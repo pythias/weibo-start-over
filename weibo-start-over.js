@@ -2,14 +2,14 @@
 // 2. 打开调试窗口，在 console 中贴下面的代码后回车
 // 3. 如需删除其他微博，请输入一下内容后回车：start(); 
 
-let mids = [];
-let midIndex = 0;
-let timer = null;
-let running = false;
-let http = new XMLHttpRequest();
+var mids = [];
+var midIndex = 0;
+var timer = null;
+var running = false;
+var http = new XMLHttpRequest();
 
 function cleanNextPage() {
-    let url = 'https://weibo.com/p/100505' + $CONFIG['uid'] + '/home';
+    let url = 'https://weibo.com/p/' + $CONFIG['page_id'] + '/home';
     http.open('GET', url, true);
     http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
     http.send();
