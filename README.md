@@ -11,7 +11,8 @@ fetch("https://raw.githubusercontent.com/pythias/weibo-start-over/master/weibo-s
     .then(response => response.text())
     .then(text => {
         eval(text);
-        cleanup.start();
+        const cleaner = new cleanup();
+        cleaner.start();
     });
 ```
 
