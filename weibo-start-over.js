@@ -15,7 +15,7 @@ cleanup.prototype.cleanNextPage = function() {
     this.reset();
     this.running = true;
 
-    const url = 'https://weibo.com/' + $CONFIG.user.profile_url;
+    const url = 'https://weibo.com' + $CONFIG.user.profile_url;
     let http = new XMLHttpRequest();
     http.open('GET', url, true);
     http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
