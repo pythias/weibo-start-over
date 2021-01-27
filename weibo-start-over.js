@@ -15,7 +15,7 @@ cleanup.prototype.cleanNextPage = function() {
     this.reset();
     this.running = true;
 
-    const url = 'https://weibo.com/p/' + $CONFIG['page_id'] + '/home';
+    const url = 'https://weibo.com/' + $CONFIG.user.profile_url;
     let http = new XMLHttpRequest();
     http.open('GET', url, true);
     http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -93,6 +93,6 @@ cleanup.prototype.start = function() {
         return;
     }
 
-    console.log("微博重头来过v1.0.0\n开始执行");
+    console.log("𝕎𝕖𝕚𝕓𝕠 𝕊𝕥𝕒𝕣𝕥 𝕆𝕧𝕖𝕣 v1.1\n开始执行");
     this.cleanNextPage();
 };
