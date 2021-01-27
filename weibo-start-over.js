@@ -15,7 +15,7 @@ cleanup.prototype.cleanNextPage = function() {
     this.reset();
     this.running = true;
 
-    const url = 'https://weibo.com' + $CONFIG.user.profile_url;
+    const url = 'https://weibo.com/ajax/statuses/mymblog?uid=' + $CONFIG.uid + '&page=1&feature=0';
     let http = new XMLHttpRequest();
     http.open('GET', url, true);
     http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -27,23 +27,28 @@ cleanup.prototype.cleanNextPage = function() {
             return;
         }
 
-        let matches = http.responseText.match(/mid=([0-9]+)/g);
-        if (matches == null) {
-            _this.stop("恭喜你！\n如有漏网，请再执行一遍");
+        let json = JSON.parse(http.responseText);
+        if (json === undefined || json.data === undefined || json.data.list === undefined) {
+            console.log("无法获取到微博列表");
+        }
+
+        let statuses = json.data.list;
+        if (statuses.length == 0) {
+            _this.stop("恭喜你！如有漏网，请再执行一遍");
             return;
         }
         
-        let values = {};
-        matches.forEach(function(match) {
-            values[match.substr(4)] = 0;
+        _this.statuses = {};
+        statuses.forEach(function(status) {
+            _this.statuses[status.id] = status;
         }, this);
 
-        _this.mids = Object.keys(values);
+        _this.mids = Object.keys(_this.statuses);
         _this.timer = setInterval(function() {
             _this.deleteNextWeibo();
         }, 1000);
 
-        console.log('即将清理 ' + _this.mids.length + ' 条微博');
+        console.log('即将清理 %d 条微博', statuses.length);
     }
 };
 
@@ -54,6 +59,8 @@ cleanup.prototype.deleteNextWeibo = function() {
         return;
     }
 
+    clearInterval(this.timer);
+
     var _this = this;
     setTimeout(function () {
         _this.cleanNextPage();
@@ -61,6 +68,7 @@ cleanup.prototype.deleteNextWeibo = function() {
 };
 
 cleanup.prototype.deleteWeibo = function(mid) {
+    const status = this.statuses[mid];
     http = new XMLHttpRequest();
     http.open('POST', 'https://weibo.com/aj/mblog/del?ajwvr=6', true);
     http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
@@ -73,7 +81,7 @@ cleanup.prototype.deleteWeibo = function(mid) {
         try {
             const json = JSON.parse(http.responseText);
             if (json.code == 100000) {
-                console.log('清理 [' + mid + ']');
+                console.log("清理 %s，发布于'%s'，内容：'%s'", mid, status.created_at, status.text);
             }
         } catch (error) {
             return;
@@ -89,7 +97,7 @@ cleanup.prototype.stop = function(message) {
 
 cleanup.prototype.start = function() {
     if (this.running) {
-        console.log('正在进行中, 请稍后或者刷新页面后再执行.');
+        console.log('正在进行中，请稍后或者刷新页面后再执行.');
         return;
     }
 
@@ -99,8 +107,8 @@ cleanup.prototype.start = function() {
 ┃┃┃┃┃┣━━┳┫╰━┳━━╮┃╰━━╋╮╭╋━━┳┻╮╭╯┃┃╱┃┣╮╭┳━━┳━╮
 ┃╰╯╰╯┃┃━╋┫╭╮┃╭╮┃╰━━╮┃┃┃┃╭╮┃╭┫┃╱┃┃╱┃┃╰╯┃┃━┫╭╯
 ╰╮╭╮╭┫┃━┫┃╰╯┃╰╯┃┃╰━╯┃┃╰┫╭╮┃┃┃╰╮┃╰━╯┣╮╭┫┃━┫┃
-╱╰╯╰╯╰━━┻┻━━┻━━╯╰━━━╯╰━┻╯╰┻╯╰━╯╰━━━╯╰╯╰━━┻╯
+╱╰╯╰╯╰━━┻┻━━┻━━╯╰━━━╯╰━┻╯╰┻╯╰━╯╰━━━╯╰╯╰━━┻╯  v1.2
 `);
-    console.log("v1.1 \n开始执行");
+    console.log("开始执行");
     this.cleanNextPage();
 };
