@@ -1,114 +1,210 @@
+// ==UserScript==
+// @name         Weibo Start Over
+// @namespace    http://tampermonkey.net/
+// @version      1.3
+// @description  Clean up your Weibo posts.
+// @author       You
+// @match        https://weibo.com/*
+// @grant        none
+// ==/UserScript==
+
+// Configuration constants
+const WEIBO_API_BASE_URL_MYMBLog = 'https://weibo.com/ajax/statuses/mymblog';
+const WEIBO_API_URL_DELETE = 'https://weibo.com/aj/mblog/del?ajwvr=6';
+const MAX_RETRIES_DELETE = 3;
+const RETRY_DELAY_MS_DELETE = 2000; // 2 seconds
+const WEIBO_PAGE_PROCESS_DELAY_MS = 1000; // Delay before fetching next page of weibo
+const WEIBO_DELETE_INTERVAL_MS = 1000; // Interval between deleting individual weibo posts
+
+/**
+ * Main class for Weibo cleanup functionality.
+ * @constructor
+ */
 function cleanup() {
-    this.reset();
+    this.reset(); // Initialize state
 }
 
+/**
+ * Resets the state of the cleanup process.
+ * Initializes/clears微博 IDs list, index, running status, and timers.
+ */
 cleanup.prototype.reset = function() {
-    this.running = false;
-    this.mids = [];
-    this.midIndex = 0;
+    this.running = false; // Indicates if the cleanup process is active
+    this.mids = [];       // Array to store Weibo post IDs (mids) for deletion
+    this.midIndex = 0;    // Index for iterating through the mids array
+    this.statuses = {};   // Object to store status details, keyed by mid
+
     if (this.timer) {
         clearInterval(this.timer);
+        this.timer = null;
     }
 };
 
+/**
+ * Fetches the next page of the user's Weibo posts and processes them.
+ * If posts are found, it initiates their deletion.
+ */
 cleanup.prototype.cleanNextPage = function() {
-    this.reset();
+    this.reset(); // Reset state before processing a new page
     this.running = true;
 
-    const url = 'https://weibo.com/ajax/statuses/mymblog?uid=' + $CONFIG.uid + '&page=1&feature=0';
-    let http = new XMLHttpRequest();
-    http.open('GET', url, true);
-    http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-    http.send();
+    // Construct the URL for fetching user's Weibo posts
+    // $CONFIG.uid is a global variable available on Weibo pages
+    const url = `${WEIBO_API_BASE_URL_MYMBLog}?uid=${$CONFIG.uid}&page=1&feature=0`;
 
-    var _this = this;
-    http.onreadystatechange = function() {
-        if (http.readyState != 4 || http.status != 200) {
-            return;
+    // Use an Immediately Invoked Function Expression (IIFE) to handle async operations
+    (async () => {
+        try {
+            console.log("Fetching Weibo posts from:", url);
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                console.error(`Error fetching Weibo list: ${response.status} ${response.statusText}`);
+                this.stop(`获取微博列表失败 (HTTP ${response.status})，请刷新页面后再试`);
+                return;
+            }
+            const json = await response.json();
+
+            if (!json || !json.data || !json.data.list) {
+                console.log("无法获取到微博列表 (数据结构异常或空列表). Response:", json);
+                this.stop("无法解析微博列表或列表为空，请刷新页面后再试");
+                return;
+            }
+
+            const statuses = json.data.list;
+            if (statuses.length === 0) {
+                this.stop("恭喜你！当前页面没有微博了。如有遗漏，请再次执行。");
+                return;
+            }
+
+            // Store status details and prepare their IDs for deletion
+            this.statuses = {};
+            statuses.forEach(status => {
+                this.statuses[status.id] = status;
+            });
+
+            this.mids = Object.keys(this.statuses); // Get all Weibo IDs from the current page
+
+            // Start deleting Weibo posts one by one at a set interval
+            this.timer = setInterval(() => {
+                this.deleteNextWeibo();
+            }, WEIBO_DELETE_INTERVAL_MS);
+
+            console.log(`即将清理 ${statuses.length} 条微博 from page.`);
+        } catch (error) {
+            console.error("Error in cleanNextPage during fetch or JSON parsing:", error);
+            this.stop("清理过程中发生错误，请刷新页面后再试");
         }
-
-        let json = JSON.parse(http.responseText);
-        if (json === undefined || json.data === undefined || json.data.list === undefined) {
-            console.log("无法获取到微博列表");
-        }
-
-        let statuses = json.data.list;
-        if (statuses.length == 0) {
-            _this.stop("恭喜你！如有漏网，请再执行一遍");
-            return;
-        }
-        
-        _this.statuses = {};
-        statuses.forEach(function(status) {
-            _this.statuses[status.id] = status;
-        }, this);
-
-        _this.mids = Object.keys(_this.statuses);
-        _this.timer = setInterval(function() {
-            _this.deleteNextWeibo();
-        }, 1000);
-
-        console.log('即将清理 %d 条微博', statuses.length);
-    }
+    })();
 };
 
 cleanup.prototype.deleteNextWeibo = function() {
+    // If there are still Weibo posts in the current list to be deleted
     if (this.midIndex < this.mids.length) {
-        this.deleteWeibo(this.mids[this.midIndex]);
-        this.midIndex++;
+        this.deleteWeibo(this.mids[this.midIndex]); // Delete the next Weibo post
+        this.midIndex++; // Move to the next ID
         return;
     }
 
+    // All Weibo posts from the current page have been processed
     clearInterval(this.timer);
+    this.timer = null;
+    console.log("Current page's Weibo posts processed. Fetching next page...");
 
-    var _this = this;
-    setTimeout(function () {
-        _this.cleanNextPage();
-    }, 1000);
+    // Automatically fetch and clean the next page after a delay
+    setTimeout(() => {
+        this.cleanNextPage();
+    }, WEIBO_PAGE_PROCESS_DELAY_MS);
 };
 
-cleanup.prototype.deleteWeibo = function(mid) {
-    const status = this.statuses[mid];
-    http = new XMLHttpRequest();
-    http.open('POST', 'https://weibo.com/aj/mblog/del?ajwvr=6', true);
-    http.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-    http.send('mid=' + mid);
-    http.onreadystatechange = function() {
-        if (http.readyState != 4 || http.status != 200) {
-            return;
-        }
+/**
+ * Deletes a single Weibo post by its ID (mid).
+ * Implements a retry mechanism for failed deletions.
+ * @param {string} mid - The ID of the Weibo post to delete.
+ */
+cleanup.prototype.deleteWeibo = async function(mid) {
+    const status = this.statuses[mid]; // Get status details for logging
+    const params = new URLSearchParams();
+    params.append('mid', mid);
 
+    // Loop for retry attempts
+    for (let attempt = 1; attempt <= MAX_RETRIES_DELETE; attempt++) {
         try {
-            const json = JSON.parse(http.responseText);
-            if (json.code == 100000) {
-                console.log("清理 %s，发布于'%s'，内容：'%s'", mid, status.created_at, status.text);
+            console.log(`Attempt ${attempt}/${MAX_RETRIES_DELETE} to delete Weibo: ${mid}`);
+            const response = await fetch(WEIBO_API_URL_DELETE, {
+                method: 'POST',
+                headers: {
+                    'Content-type': 'application/x-www-form-urlencoded'
+                },
+                body: params
+            });
+
+            if (response.ok) {
+                const json = await response.json();
+                // Weibo API success code for deletion is 100000
+                if (json && json.code === 100000) {
+                    console.log("Successfully deleted Weibo %s, posted at '%s', content: '%s'",
+                                mid, status.created_at, status.text.substring(0, 50) + (status.text.length > 50 ? "..." : ""));
+                    return; // Successful deletion, exit the function
+                } else {
+                    console.warn(`Failed to delete Weibo %s (API error code: ${json ? json.code : 'N/A'}). Attempt ${attempt}/${MAX_RETRIES_DELETE}. Response:`, mid, json);
+                }
+            } else {
+                console.warn(`Failed to delete Weibo %s (HTTP ${response.status} ${response.statusText}). Attempt ${attempt}/${MAX_RETRIES_DELETE}.`, mid);
             }
         } catch (error) {
-            return;
+            // Catch network errors or other issues with the fetch call
+            console.warn(`Error during deletion of Weibo %s (Attempt ${attempt}/${MAX_RETRIES_DELETE}):`, mid, error);
+        }
+
+        // If this attempt failed and it's not the last attempt, wait before retrying
+        if (attempt < MAX_RETRIES_DELETE) {
+            console.log(`Retrying deletion of Weibo %s in ${RETRY_DELAY_MS_DELETE / 1000}s...`, mid);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS_DELETE));
+        } else {
+            console.error(`Failed to delete Weibo %s after ${MAX_RETRIES_DELETE} attempts. Giving up on this Weibo.`, mid);
         }
     }
 };
 
+/**
+ * Stops the cleanup process and clears any active timers.
+ * @param {string} message - The message to log when stopping.
+ */
 cleanup.prototype.stop = function(message) {
     console.log(message);
     this.running = false;
-    clearInterval(this.timer);
+    if (this.timer) {
+        clearInterval(this.timer);
+        this.timer = null;
+    }
 };
 
+/**
+ * Starts the Weibo cleanup process.
+ * Displays a starting message and initiates the cleaning of the first page.
+ */
 cleanup.prototype.start = function() {
     if (this.running) {
-        console.log('正在进行中，请稍后或者刷新页面后再执行.');
+        console.warn('Cleanup process is already running. Please wait or refresh the page to start over.');
         return;
     }
 
     console.log(`
+WEIBO START OVER - v1.3
+=========================
+Initiating cleanup process...
 ╭╮╭╮╭╮╱╱╱╭╮╱╱╱╱╱╭━━━╮╭╮╱╱╱╱╱╭╮╱╭━━━╮
 ┃┃┃┃┃┃╱╱╱┃┃╱╱╱╱╱┃╭━╮┣╯╰╮╱╱╱╭╯╰╮┃╭━╮┃
 ┃┃┃┃┃┣━━┳┫╰━┳━━╮┃╰━━╋╮╭╋━━┳┻╮╭╯┃┃╱┃┣╮╭┳━━┳━╮
 ┃╰╯╰╯┃┃━╋┫╭╮┃╭╮┃╰━━╮┃┃┃┃╭╮┃╭┫┃╱┃┃╱┃┃╰╯┃┃━┫╭╯
 ╰╮╭╮╭┫┃━┫┃╰╯┃╰╯┃┃╰━╯┃┃╰┫╭╮┃┃┃╰╮┃╰━╯┣╮╭┫┃━┫┃
-╱╰╯╰╯╰━━┻┻━━┻━━╯╰━━━╯╰━┻╯╰┻╯╰━╯╰━━━╯╰╯╰━━┻╯  v1.2
+╱╰╯╰╯╰━━┻┻━━┻━━╯╰━━━╯╰━┻╯╰┻╯╰━╯╰━━━╯╰╯╰━━┻╯
 `);
-    console.log("开始执行");
-    this.cleanNextPage();
+    console.log("开始执行 Weibo 清理...");
+    this.cleanNextPage(); // Start by cleaning the first page
 };
+
+// Example of how to start the process (optional, could be triggered by a button in a real UserScript)
+// const weiboCleaner = new cleanup();
+// weiboCleaner.start();
