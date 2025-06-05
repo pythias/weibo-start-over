@@ -11,6 +11,7 @@
 // Configuration constants
 const WEIBO_API_BASE_URL_MYMBLog = 'https://weibo.com/ajax/statuses/mymblog';
 const WEIBO_API_URL_DELETE = 'https://weibo.com/aj/mblog/del?ajwvr=6';
+const WEIBO_API_URL_DESTROY_QUICK_FORWARD = 'https://weibo.com/ajax/statuses/destroy';
 const MAX_RETRIES_DELETE = 3;
 const RETRY_DELAY_MS_DELETE = 2000; // 2 seconds
 const WEIBO_PAGE_PROCESS_DELAY_MS = 1000; // Delay before fetching next page of weibo
@@ -124,14 +125,39 @@ cleanup.prototype.deleteNextWeibo = function() {
  */
 cleanup.prototype.deleteWeibo = async function(mid) {
     const status = this.statuses[mid]; // Get status details for logging
+    if (!status) {
+        console.error(`Status data for mid ${mid} not found. Skipping deletion.`);
+        return;
+    }
+
+    let apiUrl = WEIBO_API_URL_DELETE; // Default API URL for standard posts
+    let isQuickRepost = false;
+
+    // Check if it's a "quick repost"
+    if (Array.isArray(status.mblog_menus_new)) {
+        for (const menuItem of status.mblog_menus_new) {
+            if (menuItem && menuItem.type === 'mblog_menus_cancel_quick_forward') {
+                isQuickRepost = true;
+                apiUrl = WEIBO_API_URL_DESTROY_QUICK_FORWARD;
+                break;
+            }
+        }
+    }
+
     const params = new URLSearchParams();
     params.append('mid', mid);
+    // Note: For WEIBO_API_URL_DESTROY_QUICK_FORWARD, the payload might need 'id' instead of 'mid'.
+    // However, the prompt specifies 'mid=' + mid for now. If issues arise, this might need adjustment.
+    // For WEIBO_API_URL_DESTROY_QUICK_FORWARD, it often expects 'id' (which is the same as mid in this context)
+    // and sometimes 'fid' if it's a repost of a repost, but 'mid' usually works as 'id'.
+
+    const deleteTypeMessage = isQuickRepost ? "quick repost" : "standard post";
 
     // Loop for retry attempts
     for (let attempt = 1; attempt <= MAX_RETRIES_DELETE; attempt++) {
         try {
-            console.log(`Attempt ${attempt}/${MAX_RETRIES_DELETE} to delete Weibo: ${mid}`);
-            const response = await fetch(WEIBO_API_URL_DELETE, {
+            console.log(`Attempt ${attempt}/${MAX_RETRIES_DELETE} to delete ${deleteTypeMessage}: ${mid}`);
+            const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: {
                     'Content-type': 'application/x-www-form-urlencoded'
@@ -141,28 +167,31 @@ cleanup.prototype.deleteWeibo = async function(mid) {
 
             if (response.ok) {
                 const json = await response.json();
-                // Weibo API success code for deletion is 100000
-                if (json && json.code === 100000) {
-                    console.log("Successfully deleted Weibo %s, posted at '%s', content: '%s'",
-                                mid, status.created_at, status.text.substring(0, 50) + (status.text.length > 50 ? "..." : ""));
+                // Weibo API success code for deletion is typically 100000 or 'ok' in data for destroy
+                // For WEIBO_API_URL_DESTROY_QUICK_FORWARD, success might be different (e.g., json.ok === 1 or json.data.result === true)
+                // Let's assume 100000 works for both for now, or a generic truthy 'code' or 'ok' field.
+                // A common pattern for 'destroy' endpoint is just a status code 200 and simple json like {code: 100000} or {ok: 1}
+                if (json && (json.code === 100000 || json.ok === 1 || (json.data && json.data.result))) {
+                    console.log("Successfully deleted %s %s, posted at '%s', content: '%s'",
+                                deleteTypeMessage, mid, status.created_at, status.text.substring(0, 50) + (status.text.length > 50 ? "..." : ""));
                     return; // Successful deletion, exit the function
                 } else {
-                    console.warn(`Failed to delete Weibo %s (API error code: ${json ? json.code : 'N/A'}). Attempt ${attempt}/${MAX_RETRIES_DELETE}. Response:`, mid, json);
+                    console.warn(`Failed to delete ${deleteTypeMessage} %s (API response not OK: ${json ? json.code : 'N/A'}). Attempt ${attempt}/${MAX_RETRIES_DELETE}. Response:`, deleteTypeMessage, mid, json);
                 }
             } else {
-                console.warn(`Failed to delete Weibo %s (HTTP ${response.status} ${response.statusText}). Attempt ${attempt}/${MAX_RETRIES_DELETE}.`, mid);
+                console.warn(`Failed to delete ${deleteTypeMessage} %s (HTTP ${response.status} ${response.statusText}). Attempt ${attempt}/${MAX_RETRIES_DELETE}.`, mid);
             }
         } catch (error) {
             // Catch network errors or other issues with the fetch call
-            console.warn(`Error during deletion of Weibo %s (Attempt ${attempt}/${MAX_RETRIES_DELETE}):`, mid, error);
+            console.warn(`Error during deletion of ${deleteTypeMessage} %s (Attempt ${attempt}/${MAX_RETRIES_DELETE}):`, mid, error);
         }
 
         // If this attempt failed and it's not the last attempt, wait before retrying
         if (attempt < MAX_RETRIES_DELETE) {
-            console.log(`Retrying deletion of Weibo %s in ${RETRY_DELAY_MS_DELETE / 1000}s...`, mid);
+            console.log(`Retrying deletion of ${deleteTypeMessage} %s in ${RETRY_DELAY_MS_DELETE / 1000}s...`, mid);
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS_DELETE));
         } else {
-            console.error(`Failed to delete Weibo %s after ${MAX_RETRIES_DELETE} attempts. Giving up on this Weibo.`, mid);
+            console.error(`Failed to delete ${deleteTypeMessage} %s after ${MAX_RETRIES_DELETE} attempts. Giving up on this Weibo.`, mid);
         }
     }
 };
