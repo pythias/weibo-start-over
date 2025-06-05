@@ -144,31 +144,35 @@ cleanup.prototype.deleteWeibo = async function(mid) {
         }
     }
 
-    let params;
+    let headers = {
+        'Content-Type': 'application/x-www-form-urlencoded'
+    };
+    let body;
     const deleteTypeMessage = isQuickRepost ? "quick repost" : "standard post";
     let logMessageMidParam = mid; // For logging, keep original mid
 
     if (isQuickRepost) {
-        params = new URLSearchParams({ id: mid });
-        apiUrl = WEIBO_API_URL_DESTROY_QUICK_FORWARD; // Ensure apiUrl is correctly set if logic was more complex
-        logMessageMidParam = `id: ${mid}`;
+        apiUrl = WEIBO_API_URL_DESTROY_QUICK_FORWARD;
+        headers['Content-Type'] = 'application/json';
+        body = JSON.stringify({ id: mid });
+        logMessageMidParam = `id: ${mid}`; // For logging
     } else {
-        params = new URLSearchParams({ mid: mid });
         // apiUrl is already WEIBO_API_URL_DELETE by default
-        logMessageMidParam = `mid: ${mid}`;
+        // For standard deletion, keep using URLSearchParams
+        const params = new URLSearchParams({ mid: mid });
+        body = params.toString();
+        logMessageMidParam = `mid: ${mid}`; // For logging
     }
 
     // Loop for retry attempts
     for (let attempt = 1; attempt <= MAX_RETRIES_DELETE; attempt++) {
         try {
-            // Updated log to show which parameter is being used, though mid value is the same.
+            // Updated log to show which parameter is being used.
             console.log(`Attempt ${attempt}/${MAX_RETRIES_DELETE} to delete ${deleteTypeMessage} (${logMessageMidParam})`);
             const response = await fetch(apiUrl, {
                 method: 'POST',
-                headers: {
-                    'Content-type': 'application/x-www-form-urlencoded'
-                },
-                body: params.toString() // Ensure body is stringified
+                headers: headers,
+                body: body
             });
 
             if (response.ok) {
